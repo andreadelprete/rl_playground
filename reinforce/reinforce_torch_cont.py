@@ -162,7 +162,7 @@ if __name__=='__main__':
         if((i+1)%20==0):
             V = np.zeros(N_grid)
             for (i, x_init) in enumerate(X_grid):
-                x = x_init
+                x = np.copy(x_init)
                 for t in range(N):
                     u = get_max_likelihood_control(x)
                     V[i] += cost(x, u)

@@ -157,7 +157,7 @@ if __name__=='__main__':
         if((i+1)%50==0):
             V = np.zeros(N_grid)
             for (i, x_init) in enumerate(X_grid):
-                x = x_init
+                x = np.copy(x_init)
                 for t in range(N):
                     u_discr = get_max_likelihood_control(x)
                     u_cont = discr_to_cont_control(u_discr)
