@@ -24,7 +24,7 @@ def cost_to_go(rews):
 
 def dynamic_saturated(x, u):
     x_next = dynamic(x, u)
-    x_next = np.minimum(x_max, np.maximum(x, x_min))
+    x_next = np.minimum(x_max, np.maximum(x_next, x_min))
     return x_next
 
 def logits_net(x):
@@ -87,12 +87,13 @@ def plot_actor(show=True):
 
 
 if __name__=='__main__':
-    lr=1e-3
+    lr=3e-3
     epochs=100
     batch_size=5000
+    baseline = 0 # remove a baseline from the reward to go?
 
     n_x = 1
-    n_u = 5
+    n_u = 2
     N = 20
     x_min, x_max = np.array([-2.2]), np.array([2.0])
     u_min, u_max = np.array([-2.0]), np.array([2.0])
@@ -102,7 +103,7 @@ if __name__=='__main__':
     X_grid = np.linspace(x_min, x_max, N_grid).reshape((N_grid, n_x))
     running_cost = [cost(X_grid[i,:], np.zeros(1)) for i in range(X_grid.shape[0])]
 
-    # make policy
+    # make tabular policy
     logits = [np.ones(n_u) for i in range(N_grid)]
 
     # training loop
@@ -135,7 +136,12 @@ if __name__=='__main__':
                 batch_ctg.append(ep_ctg)
                 # the weight for each logprob(a|s) is R(tau)
                 # batch_weights += [ep_ctg] * N
-                batch_weights += list(cost_to_go(ep_cst))
+                rtgs = list(cost_to_go(ep_cst))
+                if(baseline):
+                    # use as baseline the cost of the current state times the number of remaining time steps in the episode
+                    for j in range(len(rtgs)):
+                        rtgs[-1-j] -= (1+j)*cost(batch_states[-1-j], np.zeros(1))
+                batch_weights += rtgs
                 # reset episode-specific variables
                 t, ep_cst, x = 0, [], np.random.uniform(x_min, x_max, size=(n_x))
                 # end experience loop if we have enough of it
@@ -154,8 +160,8 @@ if __name__=='__main__':
 
         X = np.array(batch_states)
         U = np.array(batch_ctrl, dtype=int)
-        Weights = np.array(batch_weights)
-
+        Weights = np.array(batch_weights)      
+        
         # rn = np.arange(W.shape[0], dtype=int)
         # pi = get_policy(X)
         # # prob_pre = np.array([pi.probs[i, batch_ctrl[i]].item() for i in rn])
@@ -222,25 +228,53 @@ if __name__=='__main__':
         #     x = torch.as_tensor(batch_states[j], dtype=torch.float32)
         #     print("P[u(", batch_states[j], ") =", batch_ctrl[j], "]=", get_policy(x).probs[batch_ctrl[j]].item(), ", J=", batch_weights[j])
 
-
         # import time
         # time.sleep(1)
 
-        if((i+1)%20==0):
-        #     V = np.zeros(N_grid)
-        #     for (i, x_init) in enumerate(X_grid):
-        #         x = x_init
-        #         for t in range(N):
-        #             u_discr = get_max_likelihood_control(x)
-        #             u_cont = discr_to_cont_control(u_discr)
-        #             V[i] += cost(x, u_cont)
-        #             x = dynamic(x, u_cont)
-        #         V[i] += cost(x, np.zeros(n_u))
-        #     print("Avg cost/step of max-likel. ctrl: %.3f"%(np.mean(V)/(N+1)))
+        if((i+1)%10==0):
+            V = np.zeros(N_grid)
+            for (i, x_init) in enumerate(X_grid):
+                x = x_init
+                for t in range(N):
+                    u_discr = get_max_likelihood_control(x)
+                    u_cont = discr_to_cont_control(u_discr)
+                    V[i] += cost(x, u_cont)
+                    x = dynamic(x, u_cont)
+                V[i] += cost(x, np.zeros(n_u))
+            print("Avg cost/step of max-likel. ctrl: %.3f"%(np.mean(V)/(N+1)))
 
             plot_actor(show=False)
         #     # plt.plot(batch_states, (1/N)*np.array(batch_weights), 'x ', label="Cost-to-go", alpha=0.1)
-        #     plt.plot(X_grid, V/(N+1), label="Avg value/step max-lik.", alpha=0.5)
+            plt.plot(X_grid, V/(N+1), label="Avg value/step max-lik.", alpha=0.5)
             plt.legend()
+
+            # plt.figure()
+            # plt.plot(X_grid, running_cost, label="cost", alpha=0.9)
+            # linestyles = [' x', ' o']
+            # for j in range(n_u):
+            #     ind = np.where(U==j)[0]
+            #     plt.plot(X[ind], Weights[ind], linestyles[j], label="W for u="+str(j), alpha=0.5)
+            # plt.legend()
+
+            # average weights for each state bin
+            x_discr_init = np.copy(x_min)
+            x_discr_end = x_min + x_step
+            X_discr, W_discr = [], [[] for j in range(n_u)]
+            while(True):
+                for j in range(n_u):
+                    ind = np.logical_and(U==j, np.logical_and(X>=x_discr_init, X<x_discr_end)).squeeze()
+                    W_discr[j].append(np.mean(Weights[ind]))
+                X_discr.append(0.5*(x_discr_end+x_discr_init))
+                x_discr_init += x_step
+                x_discr_end += x_step
+                if(x_discr_end>x_max):
+                    break
+            plt.figure()
+            plt.plot(X_grid, running_cost, label="cost", alpha=0.9)
+            linestyles = [' x', ' o']
+            for j in range(n_u):
+                plt.plot(X_discr, W_discr[j], linestyles[j], label="W for u="+str(j), alpha=0.5)
+            plt.legend()
+
             plt.show()
     
