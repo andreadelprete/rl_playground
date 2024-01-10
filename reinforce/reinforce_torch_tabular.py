@@ -88,7 +88,7 @@ def plot_actor(show=True):
 
 if __name__=='__main__':
     lr=3e-3
-    epochs=100
+    epochs=20
     batch_size=5000
     baseline = 0 # remove a baseline from the reward to go?
 
@@ -96,7 +96,7 @@ if __name__=='__main__':
     n_u = 2
     N = 20
     x_min, x_max = np.array([-2.2]), np.array([2.0])
-    u_min, u_max = np.array([-2.0]), np.array([2.0])
+    u_min, u_max = np.array([-1.0]), np.array([1.0])
     
     N_grid = 100
     x_step = (x_max - x_min) / (N_grid-1)
@@ -231,22 +231,21 @@ if __name__=='__main__':
         # import time
         # time.sleep(1)
 
-        if((i+1)%10==0):
+        if((i+1)%2==0):
             V = np.zeros(N_grid)
             for (i, x_init) in enumerate(X_grid):
-                x = x_init
+                x = np.copy(x_init)
                 for t in range(N):
                     u_discr = get_max_likelihood_control(x)
                     u_cont = discr_to_cont_control(u_discr)
                     V[i] += cost(x, u_cont)
-                    x = dynamic(x, u_cont)
+                    x = dynamic_saturated(x, u_cont)
                 V[i] += cost(x, np.zeros(n_u))
             print("Avg cost/step of max-likel. ctrl: %.3f"%(np.mean(V)/(N+1)))
 
             plot_actor(show=False)
         #     # plt.plot(batch_states, (1/N)*np.array(batch_weights), 'x ', label="Cost-to-go", alpha=0.1)
             plt.plot(X_grid, V/(N+1), label="Avg value/step max-lik.", alpha=0.5)
-            plt.legend()
 
             # plt.figure()
             # plt.plot(X_grid, running_cost, label="cost", alpha=0.9)
@@ -259,21 +258,21 @@ if __name__=='__main__':
             # average weights for each state bin
             x_discr_init = np.copy(x_min)
             x_discr_end = x_min + x_step
-            X_discr, W_discr = [], [[] for j in range(n_u)]
-            while(True):
+            X_discr, W_discr = np.zeros(N_grid-1), [np.zeros(N_grid-1) for j in range(n_u)]
+            for k in range(N_grid-1):
                 for j in range(n_u):
                     ind = np.logical_and(U==j, np.logical_and(X>=x_discr_init, X<x_discr_end)).squeeze()
-                    W_discr[j].append(np.mean(Weights[ind]))
-                X_discr.append(0.5*(x_discr_end+x_discr_init))
+                    if(np.any(ind)):
+                        W_discr[j][k] = np.mean(Weights[ind]) / N
+                    else:
+                        W_discr[j][k] = np.nan 
+                X_discr[k] = 0.5*(x_discr_end[0]+x_discr_init[0])
                 x_discr_init += x_step
                 x_discr_end += x_step
-                if(x_discr_end>x_max):
-                    break
-            plt.figure()
-            plt.plot(X_grid, running_cost, label="cost", alpha=0.9)
             linestyles = [' x', ' o']
-            for j in range(n_u):
-                plt.plot(X_discr, W_discr[j], linestyles[j], label="W for u="+str(j), alpha=0.5)
+            plt.plot(X_discr, W_discr[0]-W_discr[1], linestyles[1], label="delta W", alpha=0.7)
+            # for j in range(n_u):
+            #     plt.plot(X_discr, W_discr[j], linestyles[j], label="W for u="+str(j), alpha=0.5)
             plt.legend()
 
             plt.show()
