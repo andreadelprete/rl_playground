@@ -58,10 +58,10 @@ def compute_loss(x, u, weights):
     return (logp * torch.as_tensor(weights)).mean()
 
 # compute loss function gradient
-def compute_loss_grad(x, u, weight):
+def compute_loss_grad(x, u):
     logits_x = torch.tensor(logits_net(x), dtype=torch.float32, requires_grad=True)
     pi = Categorical(logits=logits_x)
-    logp = weight * pi.log_prob(torch.as_tensor(u, dtype=torch.int32))
+    logp = pi.log_prob(torch.as_tensor(u, dtype=torch.int32))
     logp.backward()
     return logits_x.grad
 
@@ -89,11 +89,15 @@ def plot_actor(show=True):
 if __name__=='__main__':
     lr=3e-3
     epochs=20
-    batch_size=5000
+    batch_size= 5000
     baseline = 0 # remove a baseline from the reward to go?
+    network_updates = 1
+    N_PLOT = 5 # show plots every N_PLOT EPOCHS
+    linestyles = [' x', ' o', ' v', ' >', ' <', ' s']
+
 
     n_x = 1
-    n_u = 2
+    n_u = 4
     N = 20
     x_min, x_max = np.array([-2.2]), np.array([2.0])
     u_min, u_max = np.array([-1.0]), np.array([1.0])
@@ -175,10 +179,45 @@ if __name__=='__main__':
         # take a single policy gradient update step
         batch_loss_pre = compute_loss(x=X, u=U, weights=Weights)
         
-        for j in range(len(batch_states)):
-            g = compute_loss_grad(batch_states[j], batch_ctrl[j], batch_weights[j])
-            logits_x = logits_net(batch_states[j]) 
-            logits_x -= lr*g.detach().numpy()
+        g_discr          = [np.zeros(n_u) for j in range(N_grid-1)] # average grad for each state-control pair
+        g_discr_weighted = [np.zeros(n_u) for j in range(N_grid-1)] # average grad for each state-control pair
+        new_order = np.arange(len(batch_states))
+        # np.random.shuffle(new_order)
+
+        # for k in range(network_updates):
+        #     for j in new_order: #range(len(batch_states)):
+        #         g = compute_loss_grad(batch_states[j], batch_ctrl[j]).detach().numpy()
+        #         x_discr = np.minimum(N_grid-2, ((batch_states[j]-x_min) / x_step).astype(int)[0])
+        #         g_discr[x_discr]          += g
+        #         g_discr_weighted[x_discr] += batch_weights[j]*g
+        #         logits[x_discr] -= lr*batch_weights[j]*g
+
+                # if((j+1)%300==0):
+                #     plt.figure()
+                #     plt.plot(X_grid, running_cost, label="cost", alpha=0.5)
+                #     for z in range(n_u):
+                #         plt.plot(X_grid[:-1], [g_discr[k][z] for k in range(N_grid-1)], linestyles[z], alpha=0.7, label="tot grad for u="+str(z))
+                #     # plt.legend()
+                #     plt.title("Grad "+str(j))
+            
+                #     plt.figure()
+                #     plt.plot(X_grid, running_cost, label="cost", alpha=0.5)
+                #     for z in range(n_u):
+                #         plt.plot(X_grid, [logits[k][z] for k in range(N_grid)], linestyles[z], label='logit '+str(z), alpha=0.5)
+                #     plt.title("Logits "+str(j))
+
+                #     g_discr          = [np.zeros(n_u) for j in range(N_grid-1)] # average grad for each state-control pair
+
+            # for j in range(N_grid-1):
+                # logits[j] -= lr*g_discr_weighted[j]
+
+
+        # OLD VERSION OF THE TRAINING
+        for k in range(network_updates):
+            for j in range(len(batch_states)):
+                g = compute_loss_grad(batch_states[j], batch_ctrl[j])
+                logits_x = logits_net(batch_states[j]) 
+                logits_x -= lr*batch_weights[j]*g.detach().numpy()
 
         batch_loss_post = compute_loss(x=X, u=U, weights=Weights)
 
@@ -231,7 +270,7 @@ if __name__=='__main__':
         # import time
         # time.sleep(1)
 
-        if((i+1)%2==0):
+        if((i+1)%N_PLOT==0):
             V = np.zeros(N_grid)
             for (i, x_init) in enumerate(X_grid):
                 x = np.copy(x_init)
@@ -256,9 +295,13 @@ if __name__=='__main__':
             # plt.legend()
 
             # average weights for each state bin
+            
             x_discr_init = np.copy(x_min)
             x_discr_end = x_min + x_step
-            X_discr, W_discr = np.zeros(N_grid-1), [np.zeros(N_grid-1) for j in range(n_u)]
+            X_discr = np.zeros(N_grid-1)
+            U_W_discr_min = np.zeros(N_grid-1)*np.nan # control associated to the min. average weight
+            W_discr = [np.zeros(N_grid-1) for j in range(n_u)] # average weight for each state-control pair
+            w_x = np.zeros(n_u) # average weights for all actions in current state
             for k in range(N_grid-1):
                 for j in range(n_u):
                     ind = np.logical_and(U==j, np.logical_and(X>=x_discr_init, X<x_discr_end)).squeeze()
@@ -266,14 +309,43 @@ if __name__=='__main__':
                         W_discr[j][k] = np.mean(Weights[ind]) / N
                     else:
                         W_discr[j][k] = np.nan 
+                    w_x[j] = W_discr[j][k]
+                if(not np.all(np.isnan(w_x))):
+                    U_W_discr_min[k] = discr_to_cont_control(np.nanargmin(w_x))[0]
                 X_discr[k] = 0.5*(x_discr_end[0]+x_discr_init[0])
                 x_discr_init += x_step
                 x_discr_end += x_step
-            linestyles = [' x', ' o']
-            plt.plot(X_discr, W_discr[0]-W_discr[1], linestyles[1], label="delta W", alpha=0.7)
-            # for j in range(n_u):
-            #     plt.plot(X_discr, W_discr[j], linestyles[j], label="W for u="+str(j), alpha=0.5)
+        
+            if(n_u==2):
+                plt.plot(X_discr, W_discr[0]-W_discr[1], linestyles[1], label="delta W", alpha=0.7)
+            plt.plot(X_discr, U_W_discr_min, 'k x', label="U with W min")
             plt.legend()
 
-            plt.show()
+            # plt.figure()
+            # plt.plot(X_grid, running_cost, label="cost")
+            # # plt.plot(X_np, W_np/N, ' o', label="Weights", alpha=0.2)
+            # for j in range(n_u):
+            #     plt.plot(X_discr, W_discr[j], linestyles[j], alpha=0.7, label="mean W for u="+str(j))
+            # plt.legend()
+
+            plt.figure()
+            plt.plot(X_grid, running_cost, label="cost", alpha=0.5)
+            for j in range(n_u):
+                plt.plot(X_grid, [logits[k][j] for k in range(N_grid)], linestyles[j], label='logit '+str(j), alpha=0.5)
+                # plt.plot(X_discr, data_counter[:,j], label="Data counter u="+str(j))
+            plt.legend()
+
+            # plt.figure()
+            # plt.plot(X_grid, running_cost, label="cost", alpha=0.5)
+            # for j in range(n_u):
+            #     plt.plot(X_discr, [g_discr[k][j] for k in range(N_grid-1)], linestyles[j], alpha=0.7, label="tot grad for u="+str(j))
+            # plt.legend()
+
+            # plt.figure()
+            # plt.plot(X_grid, running_cost, label="cost", alpha=0.5)
+            # for j in range(n_u):
+            #     plt.plot(X_discr, [g_discr_weighted[k][j] for k in range(N_grid-1)], linestyles[j], alpha=0.7, label="weighted grad for u="+str(j))
+            # plt.legend()
+
+            # plt.show()
     
