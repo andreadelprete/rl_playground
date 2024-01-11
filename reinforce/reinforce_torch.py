@@ -91,12 +91,15 @@ def plot_actor(show=True):
 if __name__=='__main__':
     hidden_sizes=[8,8,8]
     lr=1e-2
-    epochs=200
-    batch_size=500
+    epochs=20
+    batch_size=5000
+    network_updates = 10
+
+    N_PLOT = 10 # show plots every N_PLOT EPOCHS
 
     n_x = 1
     n_u = 2
-    N = 30
+    N = 20
     x_min, x_max = np.array([-2.2]), np.array([2.0])
     u_min, u_max = np.array([-1.0]), np.array([1.0])
     
@@ -146,14 +149,15 @@ if __name__=='__main__':
                 if len(batch_states) > batch_size:
                     break
 
-        # take a single policy gradient update step
-        optimizer.zero_grad()
-        batch_loss = compute_loss(x=torch.as_tensor(batch_states, dtype=torch.float32),
-                                  u=torch.as_tensor(batch_ctrl, dtype=torch.int32),
-                                  weights=torch.as_tensor(batch_weights, dtype=torch.float32)
-                                  )
-        batch_loss.backward()
-        optimizer.step()
+        # take policy gradient update step
+        for j in range(network_updates):
+            optimizer.zero_grad()
+            batch_loss = compute_loss(x=torch.as_tensor(batch_states, dtype=torch.float32),
+                                    u=torch.as_tensor(batch_ctrl, dtype=torch.int32),
+                                    weights=torch.as_tensor(batch_weights, dtype=torch.float32)
+                                    )
+            batch_loss.backward()
+            optimizer.step()
         return batch_loss, batch_ctg, batch_states, batch_weights
 
     # training loop
@@ -162,7 +166,7 @@ if __name__=='__main__':
         print('epoch: %3d \t loss: %.3f \t avg cost per step: %.3f'%
                 (i, batch_loss, np.mean(batch_ctg)/N))
         
-        if((i+1)%50==0):
+        if((i+1)%N_PLOT==0):
             V = np.zeros(N_grid)
             for (i, x_init) in enumerate(X_grid):
                 x = np.copy(x_init)
@@ -178,7 +182,7 @@ if __name__=='__main__':
             # plt.plot(batch_states, (1/N)*np.array(batch_weights), 'x ', label="Cost-to-go", alpha=0.1)
             plt.plot(X_grid, V/(N+1), label="Avg value/step max-lik.", alpha=0.5)
             plt.legend()
-            plt.show()
+            # plt.show()
     
     # EVALUATE STOCHASTIC POLICY BY MONTE-CARLO SAMPLING
     # N_SAMPLES = 100
