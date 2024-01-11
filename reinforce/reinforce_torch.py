@@ -64,13 +64,21 @@ def plot_actor(show=True):
     plt.figure()
     plt.plot(X_grid, running_cost, label="cost", alpha=0.5)
 
-    U_ml_discr = [get_max_likelihood_control(x) for x in X_grid]
-    U_ml_cont = discr_to_cont_control(U_ml_discr)
-    plt.plot(X_grid, U_ml_cont, 'o ', label="Max Likelihood Control")
+    # U_ml_discr = [get_max_likelihood_control(x) for x in X_grid]
+    # U_ml_cont = discr_to_cont_control(U_ml_discr)
+    # plt.plot(X_grid, U_ml_cont, 'o ', label="Max Likelihood Control")
     
     # U_mean_discr = [get_mean_control(x) for x in X_grid]
     # U_mean_cont = discr_to_cont_control(U_mean_discr)
     # plt.plot(X_grid, U_mean_cont, 'x ', label="Mean Control")
+
+    U_cont = discr_to_cont_control(np.arange(n_u))
+    for i in range(X_grid.shape[0]):
+        x = torch.as_tensor(X_grid[i,:], dtype=torch.float32)
+        probs = get_policy(x).probs.detach().numpy()
+        probs /= np.max(probs)
+        for u in range(n_u):
+            plt.plot(X_grid[i], U_cont[u], 'ro ', alpha=probs[u])
     
     plt.title("Actor")
     plt.xlabel("State x")
@@ -162,7 +170,7 @@ if __name__=='__main__':
                     u_discr = get_max_likelihood_control(x)
                     u_cont = discr_to_cont_control(u_discr)
                     V[i] += cost(x, u_cont)
-                    x = dynamic(x, u_cont)
+                    x = dynamic_saturated(x, u_cont)
                 V[i] += cost(x, np.zeros(n_u))
             print("Avg cost/step of max-likel. ctrl: %.3f"%(np.mean(V)/(N+1)))
 
