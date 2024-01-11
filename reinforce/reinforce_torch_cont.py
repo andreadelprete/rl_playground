@@ -95,13 +95,15 @@ def plot_actor(show=True):
 
 if __name__=='__main__':
     hidden_sizes=[8,8,8]
-    lr=1e-2
-    max_epochs=400
-    batch_size=500
+    lr=3e-3
+    max_epochs=60
+    batch_size=5000
+    network_updates = 10
+    N_PLOT = 20 # show plots every N_PLOT EPOCHS
 
     n_x = 1
     n_u = 1
-    N = 30
+    N = 20
     x_min, x_max = np.array([-2.2]), np.array([2.0])
     u_min, u_max = np.array([-2.0]), np.array([2.0])
     
@@ -147,19 +149,20 @@ if __name__=='__main__':
                 if len(batch_states) > batch_size:
                     break
 
-        # take a single policy gradient update step
-        optimizer.zero_grad()
-        batch_loss = compute_loss(x=torch.as_tensor(batch_states, dtype=torch.float32),
-                                  u=torch.as_tensor(batch_ctrl, dtype=torch.float32),
-                                  weights=torch.as_tensor(batch_weights, dtype=torch.float32)
-                                  )
-        batch_loss.backward()
-        optimizer.step()
+        # take policy gradient update step
+        for j in range(network_updates):
+            optimizer.zero_grad()
+            batch_loss = compute_loss(x=torch.as_tensor(batch_states, dtype=torch.float32),
+                                    u=torch.as_tensor(batch_ctrl, dtype=torch.float32),
+                                    weights=torch.as_tensor(batch_weights, dtype=torch.float32)
+                                    )
+            batch_loss.backward()
+            optimizer.step()
 
         print('epoch: %3d \t loss: %.3f \t avg cost per step: %.3f'%
                 (i, batch_loss, np.mean(batch_ctg)/N))
         
-        if((i+1)%20==0):
+        if((i+1)%N_PLOT==0):
             V = np.zeros(N_grid)
             for (i, x_init) in enumerate(X_grid):
                 x = np.copy(x_init)
