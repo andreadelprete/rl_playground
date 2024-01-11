@@ -14,14 +14,11 @@ import rl_playground.utils.plot_utils as plut
     Implementation based on PyTorch for representing the policy as a NN, and
     tested on a simple non-convex 1D single integrator problem.
 '''
-def cost(x, u):
-    # return x[0]**2
-    x = x[0]
-    c = 0.0*u*u + (x-1.9)*(x-1.0)*(x-0.6)*(x+0.5)*(x+1.2)*(x+2.1)
-    return c[0]
-
-def positive_cost(x, u):
-    return cost(x, u) #+ 7.0
+# def cost(x, u):
+#     # return x[0]**2
+#     x = x[0]
+#     c = w_u*u*u + (x-1.9)*(x-1.0)*(x-0.6)*(x+0.5)*(x+1.2)*(x+2.1)
+#     return c[0]
 
 def cost_to_go(rews):
     n = len(rews)
@@ -85,7 +82,7 @@ def plot_episode_data(X, U, W, show=True):
     plt.plot(X_grid, running_cost, label="cost", alpha=0.5)
     for i in range(n_u):
         ind = np.where(U==i)[0]
-        plt.plot(X[ind], W[ind], 'x ', label="u="+str(i), alpha=0.5)
+        plt.plot(X[ind], W[ind], 'v ', label="u="+str(i), alpha=0.5)
     plt.xlabel("State x")
     if(show): 
         plt.legend()
@@ -118,15 +115,19 @@ def plot_actor(show=True):
 if __name__=='__main__':
     hidden_sizes=[8, 8, 8]
     lr=1e-2
-    epochs=200
-    batch_size=500
+    epochs=20
+    batch_size=5000
+    # minibatch_size = 10000
+    network_updates = 10
+    baseline = False
     
     N_PLOT = 10 # show plots every N_PLOT EPOCHS
     PLOT_PROB = 0 # enable plots of probabilities of different actions
+    linestyles = [' x', ' o', ' v', ' >', ' <', ' s', '.', '^']*2
 
     n_x = 1
-    n_u = 2
-    N = 30
+    n_u = 10
+    N = 20
     # x_min, x_max = np.array([-2.2]), np.array([2.0])
     x_min, x_max = np.array([-2.2]), np.array([2.0])
     u_min, u_max = np.array([-1.0]), np.array([1.0])
@@ -156,7 +157,7 @@ if __name__=='__main__':
             batch_states.append(x)
             u_discr = sample_control(x)
             u_cont = discr_to_cont_control(u_discr)
-            cst = positive_cost(x, u_cont)
+            cst = cost(x, u_cont)
             x = dynamic_saturated(x, u_cont)
 
             # save action, reward
@@ -169,7 +170,12 @@ if __name__=='__main__':
                 batch_ctg.append(ep_ctg)
                 # the weight for each logprob(a|s) is R(tau)
                 # batch_weights += [ep_ctg]*N
-                batch_weights += list(cost_to_go(ep_cst))
+                ctgs = list(cost_to_go(ep_cst))
+                if(baseline):
+                    # use as baseline the cost of the current state times the number of remaining time steps in the episode
+                    for j in range(len(ctgs)):
+                        ctgs[-1-j] -= (1+j)*cost(batch_states[-1-j], np.zeros(1))
+                batch_weights += ctgs
                 # reset episode-specific variables
                 t, ep_cst, x = 0, [], np.random.uniform(x_min, x_max, size=(n_x))
                 # end experience loop if we have enough of it
@@ -202,8 +208,10 @@ if __name__=='__main__':
         
         # take a single policy gradient update step
         batch_loss_pre = compute_loss(x=X_torch, u=U_torch, weights=W_torch)
-        for j in range(1):
+        for j in range(network_updates):
+            # ind = np.random.randint(N, size=minibatch_size)
             optimizer.zero_grad()
+            # batch_loss = compute_loss(x=X_torch[ind], u=U_torch[ind], weights=W_torch[ind])
             batch_loss = compute_loss(x=X_torch, u=U_torch, weights=W_torch)
             batch_loss.backward()
             optimizer.step()
@@ -213,7 +221,7 @@ if __name__=='__main__':
         print('epoch: %3d \t loss: %.3f \t delta loss: %.3f \t avg cost per step: %.3f'%
                 (i, batch_loss_pre, batch_loss_post-batch_loss_pre, np.mean(batch_ctg)/N))
         
-        # plot_episode_data(X_np, U_np, W_np, show=True)
+        # plot_episode_data(X_np, U_np, W_np, show=False)
 
         if(PLOT_PROB):
             pi = get_policy(X_torch)
@@ -278,9 +286,53 @@ if __name__=='__main__':
             plot_actor(show=False)
             # plt.plot(batch_states, (1/N)*np.array(batch_weights), 'x ', label="Cost-to-go", alpha=0.1)
             plt.plot(X_grid, V/(N+1), label="Avg value/step max-lik.", alpha=0.5)
-            plt.legend()
-            plt.show()
+            # plt.legend()
+            # plt.show()
 
-            # import time
-            # time.sleep(1)
+            # average weights for each state bin
+            x_step = X_grid[1] - X_grid[0]
+            x_discr_init = np.copy(x_min)
+            x_discr_end = x_min + x_step
+            X_discr = np.zeros(N_grid-1)
+            U_W_discr_min = np.zeros(N_grid-1)*np.nan # control associated to the min. average weight
+            W_discr = [np.zeros(N_grid-1) for j in range(n_u)] # average weight for each state-control pair
+            w_x = np.zeros(n_u) # average weights for all actions in current state
+            data_counter = np.zeros((N_grid-1, n_u)) # count how many data points are available for each state-action pair
+            for k in range(N_grid-1):
+                for j in range(n_u):
+                    ind = np.logical_and(U_np==j, np.logical_and(X_np.squeeze()>=x_discr_init, X_np.squeeze()<x_discr_end)).squeeze()
+                    data_counter[k,j] = np.sum(ind)
+                    if(np.any(ind)):
+                        W_discr[j][k] = np.mean(W_np[ind]) / N
+                    else:
+                        W_discr[j][k] = np.nan 
+                    w_x[j] = W_discr[j][k]
+                if(not np.all(np.isnan(w_x))):
+                    U_W_discr_min[k] = discr_to_cont_control(np.nanargmin(w_x))[0]
+                X_discr[k] = 0.5*(x_discr_end[0]+x_discr_init[0])
+                x_discr_init += x_step
+                x_discr_end += x_step
+            
+            if(n_u==2):
+                plt.plot(X_discr, W_discr[0]-W_discr[1], linestyles[1], label="delta W", alpha=0.7)
+            plt.plot(X_discr, U_W_discr_min, 'k x', label="U with W min")
+            plt.legend()
+
+            plt.figure()
+            plt.plot(X_grid, running_cost, label="cost")
+            # plt.plot(X_np, W_np/N, ' o', label="Weights", alpha=0.2)
+            for j in range(n_u):
+                plt.plot(X_discr, W_discr[j], linestyles[j], alpha=0.7, label="mean W for u="+str(j))
+            plt.legend()
+
+            plt.figure()
+            logits = logits_net(torch.as_tensor(X_grid, dtype=torch.float32))
+            logits = logits.detach().numpy()
+            plt.plot(X_grid, running_cost, label="cost", alpha=0.5)
+            for j in range(n_u):
+                plt.plot(X_grid, logits[:,j], linestyles[j], label=str(j))
+                # plt.plot(X_discr, data_counter[:,j], label="Data counter u="+str(j))
+            plt.legend()
+
+            # plt.show()
     
